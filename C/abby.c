@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <termios.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 // setting up ctrl-q to quit
@@ -14,8 +15,14 @@
 
 
 /* Declarations */
+struct editorConfig {
+  int term_rows;
+  int term_cols;
+  struct termios org_term;
+};
 
-struct termios org_term;
+struct editorConfig E;
+
 
 // disable console echo
 // this will make no input showup, like entering a password
@@ -32,9 +39,17 @@ void Yamete(const char *s);
 char ReadKey();
 void ProcessKey();
 
-// screen stuff
+// screen drawing
 void ScreenRefresh();
 void DrawRows();
+int WindowSize(int *rows, int *cols);
+
+// cursor stuff
+int CursorPosition(int *rows, int *cols);
+
+void InitEditor();
+
+
 
 
 /* Functions */
@@ -64,12 +79,12 @@ void ProcessKey() {
 }
 
 void StartRawMode() {
-  if (tcgetattr(STDIN_FILENO, &org_term) == -1) {
+  if (tcgetattr(STDIN_FILENO, &E.org_term) == -1) {
     Yamete("tcgetattr");
   }
   atexit(EndRawMode);
 
-  struct termios raw_term = org_term;
+  struct termios raw_term = E.org_term;
 
   // these are bitflags
   // first some old miscellaneous flags for old terminal emulators
@@ -98,7 +113,7 @@ void StartRawMode() {
 }
 
 void EndRawMode() {
-  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &org_term) == -1) {
+  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.org_term) == -1) {
     Yamete("tcsetattr");
   }
   return;
@@ -133,20 +148,63 @@ void ScreenRefresh() {
 }
 
 void DrawRows() {
-  // just 24 rows for now
-  int i;
-  for (i = 0; i < 24; i++) {
+  for (int i = 0; i < E.term_rows; ++i) {
     write(STDOUT_FILENO, ">\r\n", 3);
   }
   return;
+}
+
+int WindowSize(int *rows, int *cols) {
+  struct winsize ws;
+  // ioctl will put the terminal rows and cols into ws, or return -1
+  if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    // but first a backup if ioctl doesn't work
+    // the C command is cursor forward
+    // the B command is cursor down
+    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) {
+      return -1;
+    }
+    return CursorPosition(rows, cols);
+  }
+  else {
+    *cols = ws.ws_col;
+    *rows = ws.ws_row;
+    return 0;
+  }
+}
+
+int CursorPosition(int *rows, int *cols) {
+  // the n command is Device Status Report, 6 asks for cursor position
+  if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+
+  // setting up a timeout buffer for some systems
+  // it also breaks on the 'R' character
+  char buf[32];
+  unsigned int i;
+  for (i = 0; i < sizeof(buf) - 1; ++i) {
+    if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
+    if (buf[i] == 'R') break;
+  }
+  buf[i] = '\0';
+  if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+
+  return 0;
+}
+
+void InitEditor() {
+  if (WindowSize(&E.term_rows, &E.term_cols) == -1) {
+    Yamete("WindowSize");
+  }
 }
 
 
 
 
 int main() {
-  // disabling echoing
+  // setup abby
   StartRawMode();
+  InitEditor();
 
   // read every input as it comes in
   while (1) {
