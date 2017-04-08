@@ -29,7 +29,7 @@ struct editorConfig E;
 // using this to make a kind of dynamic string
 // which lets me simplify write()
 struct abuf {
-  char b;
+  char *b;
   int len;
 };
 #define ABUF_INIT { NULL, 0 }
@@ -181,7 +181,7 @@ void DrawRows(struct abuf *ab) {
     if (i == E.term_rows / 3) {
       // write the message
       char wel[30];
-      int weln = snprinf(wel, sizeof(wel), "Abigail Editor ✒︎ v. %s", ABBY_VER);
+      int weln = snprintf(wel, sizeof(wel), "Abigail Editor ✒︎ v. %s", ABBY_VER);
       if (weln > E.term_cols) weln = E.term_cols;
       // center the message
       int pad = (E.term_cols - weln) / 2;
@@ -251,10 +251,10 @@ void InitEditor() {
 }
 
 void abufAppend(struct abuf *ab, const char *s, int len) {
-  char *new = realloc(ab->b, ab->len + len);
-  if (!new) return;
-  memcpy(&new[ab->len], s, len);
-  ab->b = new;
+  char *neu = realloc(ab->b, ab->len + len);
+  if (!neu) return;
+  memcpy(&neu[ab->len], s, len);
+  ab->b = neu;
   ab->len += len;
   return;
 }
