@@ -18,6 +18,8 @@
 
 /* Declarations */
 struct editorConfig {
+  int cx;
+  int cy;
   int term_rows;
   int term_cols;
   struct termios org_term;
@@ -57,6 +59,7 @@ int WindowSize(int *rows, int *cols);
 
 // cursor stuff
 int CursorPosition(int *rows, int *cols);
+void MoveCursor(char key);
 
 // start the editor
 void InitEditor();
@@ -79,6 +82,7 @@ char ReadKey() {
       Yamete("read");
     }
   }
+
   return c;
 }
 
@@ -90,6 +94,30 @@ void ProcessKey() {
       write(STDOUT_FILENO, "\x1b[2J", 4);
       write(STDOUT_FILENO, "\x1b[H", 3);
       exit(0);
+      break;
+
+
+    case 8: // home key
+      E.cx = 0;
+      break;
+    case 9: // end key
+      E.cx = E.term_cols - 1;
+      break;
+
+    case 5: // page up
+    case 6: // page down
+      for (int n = E.term_rows; n > 0; --n) {
+        if (c == 5) MoveCursor(65);
+        else if (c == 6) MoveCursor(66);
+      }
+      break;
+
+
+    case 65: // arrowkey up
+    case 66: // arrowkey down
+    case 67: // arrowkey right
+    case 68: // arrowkey left
+      MoveCursor(c);
       break;
   }
   return;
@@ -165,7 +193,11 @@ void ScreenRefresh() {
   abufAppend(&ab, "\x1b[H", 3);
 
   DrawRows(&ab);
-  abufAppend(&ab, "\x1b[H", 3);
+
+  // set the cursor position correctly
+  char buf[32];
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  abufAppend(&ab, buf, strlen(buf));
 
   // return the cursor after refresh
   abufAppend(&ab, "\x1b[?25h", 6);
@@ -181,7 +213,7 @@ void DrawRows(struct abuf *ab) {
     if (i == E.term_rows / 3) {
       // write the message
       char wel[30];
-      int weln = snprintf(wel, sizeof(wel), "Abigail Editor ✒︎ v. %s", ABBY_VER);
+      int weln = snprintf(wel, sizeof(wel), "Abigail Editor uwu v%s", ABBY_VER);
       if (weln > E.term_cols) weln = E.term_cols;
       // center the message
       int pad = (E.term_cols - weln) / 2;
@@ -244,7 +276,29 @@ int CursorPosition(int *rows, int *cols) {
   return 0;
 }
 
+void MoveCursor(char key) {
+  switch (key) {
+    case 65: // arrowkey up
+      if (E.cy != 0) --E.cy;
+      break;
+    case 66: // arrowkey down
+      if (E.cy != E.term_rows - 1) ++E.cy;
+      break;
+    case 67: // arrowkey right
+      if (E.cx != E.term_cols - 1) ++E.cx;
+      break;
+    case 68: // arrowkey left
+      if (E.cx != 0) --E.cx;
+      break;
+  }
+  return;
+}
+
 void InitEditor() {
+  // cursor coordinates
+  E.cx = 0;
+  E.cy = 0;
+
   if (WindowSize(&E.term_rows, &E.term_cols) == -1) {
     Yamete("WindowSize");
   }
