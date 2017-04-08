@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <termios.h>
@@ -11,6 +12,7 @@
 // this mirrors what the ctrl key does and sets the upper 3 bits to 0
 #define CTRL_KEY(k) ((k) & 0x1f)
 
+#define ABBY_VER "0.0.1"
 
 
 
@@ -22,6 +24,15 @@ struct editorConfig {
 };
 
 struct editorConfig E;
+
+// the append buffer
+// using this to make a kind of dynamic string
+// which lets me simplify write()
+struct abuf {
+  char b;
+  int len;
+};
+#define ABUF_INIT { NULL, 0 }
 
 
 // disable console echo
@@ -41,14 +52,20 @@ void ProcessKey();
 
 // screen drawing
 void ScreenRefresh();
-void DrawRows();
+void DrawRows(struct abuf *ab);
 int WindowSize(int *rows, int *cols);
 
 // cursor stuff
 int CursorPosition(int *rows, int *cols);
 
+// start the editor
 void InitEditor();
 
+// append to the buffer
+void abufAppend(struct abuf *ab, const char *s, int len);
+
+// free up the buffer
+void abufFree(struct abuf *ab);
 
 
 
@@ -130,6 +147,11 @@ void Yamete(const char *s) {
 }
 
 void ScreenRefresh() {
+  struct abuf ab = ABUF_INIT;
+
+  // hide the cursor during refresh
+  abufAppend(&ab, "\x1b[?25l", 6);
+
   // this is writing 4 bytes to the terminal
   // the first is \x1b, the escape character
   // then the other three bytes are [2J
@@ -137,19 +159,49 @@ void ScreenRefresh() {
   // J clears the screen, and the 2 means the entire screen
   // I'm using VT100 escape sequences here, they are supported most places
   // later it may change to ncurses
-  write(STDOUT_FILENO, "\x1b[2J", 4);
+  // abufAppend(&ab, "\x1b[2J", 4); /* depreciated full screen refresh */
   // put the cursor at the top left
   // H is cursor position
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  abufAppend(&ab, "\x1b[H", 3);
 
-  DrawRows();
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  DrawRows(&ab);
+  abufAppend(&ab, "\x1b[H", 3);
+
+  // return the cursor after refresh
+  abufAppend(&ab, "\x1b[?25h", 6);
+
+  write(STDOUT_FILENO, ab.b, ab.len);
+  abufFree(&ab);
   return;
 }
 
-void DrawRows() {
+void DrawRows(struct abuf *ab) {
   for (int i = 0; i < E.term_rows; ++i) {
-    write(STDOUT_FILENO, ">\r\n", 3);
+    // display a welcome screen
+    if (i == E.term_rows / 3) {
+      // write the message
+      char wel[30];
+      int weln = snprinf(wel, sizeof(wel), "Abigail Editor ✒︎ v. %s", ABBY_VER);
+      if (weln > E.term_cols) weln = E.term_cols;
+      // center the message
+      int pad = (E.term_cols - weln) / 2;
+      if (pad != 0) {
+        abufAppend(ab, "~", 1);
+        --pad;
+      }
+      while (pad > 0) {
+        abufAppend(ab, " ", 1);
+        --pad;
+      }
+
+      abufAppend(ab, wel, weln);
+    }
+    else abufAppend(ab, "~", 1);
+
+    // clear each line as it is drawn
+    abufAppend(ab, "\x1b[K", 1);
+    // stops terminal scroll on last line
+    if (i < E.term_rows - 1) abufAppend(ab, "\r\n", 1);
   }
   return;
 }
@@ -157,7 +209,7 @@ void DrawRows() {
 int WindowSize(int *rows, int *cols) {
   struct winsize ws;
   // ioctl will put the terminal rows and cols into ws, or return -1
-  if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
     // but first a backup if ioctl doesn't work
     // the C command is cursor forward
     // the B command is cursor down
@@ -197,6 +249,21 @@ void InitEditor() {
     Yamete("WindowSize");
   }
 }
+
+void abufAppend(struct abuf *ab, const char *s, int len) {
+  char *new = realloc(ab->b, ab->len + len);
+  if (!new) return;
+  memcpy(&new[ab->len], s, len);
+  ab->b = new;
+  ab->len += len;
+  return;
+}
+
+void abufFree(struct abuf *ab) {
+  free(ab->b);
+  return;
+}
+
 
 
 
