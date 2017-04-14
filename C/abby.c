@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 // setting up ctrl-q to quit
@@ -17,11 +18,21 @@
 
 
 /* Declarations */
+
+// the editor row
+// the typedef lets me refer to the type as erow instead of struct erow
+typedef struct erow {
+  int size;
+  char *chars;
+} erow;
+
 struct editorConfig {
   int cx;
   int cy;
   int term_rows;
   int term_cols;
+  int numrows;
+  erow row;
   struct termios org_term;
 };
 
@@ -69,6 +80,8 @@ void abufAppend(struct abuf *ab, const char *s, int len);
 
 // free up the buffer
 void abufFree(struct abuf *ab);
+
+void OnEditOpen();
 
 
 
@@ -209,26 +222,38 @@ void ScreenRefresh() {
 
 void DrawRows(struct abuf *ab) {
   for (int i = 0; i < E.term_rows; ++i) {
-    // display a welcome screen
-    if (i == E.term_rows / 3) {
-      // write the message
-      char wel[30];
-      int weln = snprintf(wel, sizeof(wel), "Abigail Editor uwu v%s", ABBY_VER);
-      if (weln > E.term_cols) weln = E.term_cols;
-      // center the message
-      int pad = (E.term_cols - weln) / 2;
-      if (pad != 0) {
-        abufAppend(ab, "~", 1);
-        --pad;
-      }
-      while (pad > 0) {
-        abufAppend(ab, " ", 1);
-        --pad;
-      }
+    if (i >= E.numrows) {
+      // display a welcome screen
+      if (i == E.term_rows / 3) {
+        // write the message
+        char wel[30];
+        int weln = snprintf(wel, sizeof(wel), "Abigail Editor uwu v%s", ABBY_VER);
+        if (weln > E.term_cols) weln = E.term_cols;
+        // center the message
+        int pad = (E.term_cols - weln) / 2;
+        if (pad != 0) {
+          abufAppend(ab, "~", 1);
+          --pad;
+        }
+        while (pad > 0) {
+          abufAppend(ab, " ", 1);
+          --pad;
+        }
 
-      abufAppend(ab, wel, weln);
+        abufAppend(ab, wel, weln);
+      }
+      else abufAppend(ab, "~", 1);
     }
-    else abufAppend(ab, "~", 1);
+    // actually draw the rows here
+    else {
+      int len = E.row.size;
+      if (len > E.term_rows) len = E.term_cols;
+      abufAppend(ab, E.row.chars, len);
+    }
+
+
+
+
 
     // clear each line as it is drawn
     abufAppend(ab, "\x1b[K", 1);
@@ -299,6 +324,8 @@ void InitEditor() {
   E.cx = 0;
   E.cy = 0;
 
+  E.numrows = 0;
+
   if (WindowSize(&E.term_rows, &E.term_cols) == -1) {
     Yamete("WindowSize");
   }
@@ -318,6 +345,18 @@ void abufFree(struct abuf *ab) {
   return;
 }
 
+void OnEditOpen() {
+  char *line = "It is working!";
+  ssize_t linelen = 13;
+
+  E.row.size = linelen;
+  E.row.chars = malloc(linelen + 1);
+  memcpy(E.row.chars, line, linelen);
+  E.row.chars[linelen] = '\0';
+  E.numrows = 1;
+  return;
+}
+
 
 
 
@@ -326,6 +365,7 @@ int main() {
   // setup abby
   StartRawMode();
   InitEditor();
+  OnEditOpen();
 
   // read every input as it comes in
   while (1) {
